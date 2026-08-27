@@ -33,6 +33,8 @@ latch-contracts/
 │   └── spending-limit-policy/       # ✅ Spending-limit policy
 ├── demo/                        # Demo/reference code — not shipped, not deployed for real use
 │   └── modified-ed25519-verifier/   # Wallet-signing-popup wrapping pattern, kept for reference
+├── templates/
+│   └── recurring-escrow/        # Personal escrow template for recurring payments
 ├── factory-spec.md              # Behavioral spec for the factory
 └── UPGRADE_PATH.md              # Account & factory upgrade path decision
 ```
@@ -85,6 +87,12 @@ Thin wrapper around OZ's `stellar-accounts` spending-limit policy. Enforces a ro
 
 Not part of the shipped contract lineup — not deployed for real use, not wired into anything. `modified-ed25519-verifier` was built to prove a one-off demo (a Phantom-held key deploying and owning a Latch smart account on-chain), not a real product feature: Latch and Phantom are separate browser extensions, and nothing gives Latch's own extension an ongoing way to drive Phantom's signing popup afterward. Kept as a worked reference for the general "wallet popup won't sign a raw hash" wrapping pattern — see its module doc.
 
+### Templates — `templates/`
+
+Single-purpose "personal contract" templates — deploy-your-own satellite contracts that cover common backend-automation use cases without adding ongoing policies to the main account.
+
+- **Recurring payment escrow — `templates/recurring-escrow/`**: the owner pre-funds the contract with a lump sum; a designated payee can pull a fixed amount on a fixed ledger schedule, up to the funded total. The owner can cancel at any time and reclaim the remaining balance. See [`templates/recurring-escrow-spec.md`](templates/recurring-escrow-spec.md).
+
 ## Deployment Order
 
 Before a factory can be deployed, all singleton contracts must already exist on the network. The required order is:
@@ -128,6 +136,7 @@ stellar contract build                                       # WASM build
 ## Spec and Planning
 
 - [`factory-spec.md`](factory-spec.md) — Detailed behavioral specification for the factory contract (validation rules, address derivation formula, canonicalization, worked examples)
+- [`templates/recurring-escrow-spec.md`](templates/recurring-escrow-spec.md) — Behavioral specification for the recurring payment escrow template
 - [`UPGRADE_PATH.md`](UPGRADE_PATH.md) — How the factory and smart account handle upgrades and versioning
 - [`MAINNET_READINESS_CHECKLIST.md`](MAINNET_READINESS_CHECKLIST.md) — What's still open before real funds sit behind these contracts
 - [`ISSUE_TRIAGE_GUIDE.md`](ISSUE_TRIAGE_GUIDE.md) — How we got every open issue here ready for outside contributors; apply the same process in the other Latch repos

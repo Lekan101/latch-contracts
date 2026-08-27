@@ -3,8 +3,9 @@
 extern crate std;
 
 use soroban_sdk::{
-    contract, contractimpl, testutils::Address as _, testutils::Events, testutils::Ledger, Address,
-    Env, Vec,
+    contract, contractimpl,
+    testutils::{Address as _, Events, Ledger},
+    Address, Env, IntoVal,
 };
 
 use super::*;
@@ -89,7 +90,7 @@ fn constructor_stores_config_and_state() {
     assert_eq!(config.period_ledgers, PERIOD);
 
     let state = client.get_state();
-    assert_eq!(state.last_pull_ledger, 0);
+    assert_eq!(state.last_pull_ledger, e.ledger().sequence());
     assert!(!state.cancelled);
 }
 
@@ -116,7 +117,7 @@ fn constructor_rejects_negative_amount() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #4)")]
+#[should_panic(expected = "Error(Contract, #6)")]
 fn constructor_rejects_zero_period() {
     let e = Env::default();
     let owner = Address::generate(&e);
@@ -143,7 +144,7 @@ fn pull_after_period_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #4)")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn pull_before_period_rejected() {
     let (e, _owner, payee, _token_addr, escrow_addr) = setup();
     let client = escrow(&e, &escrow_addr);
@@ -153,7 +154,7 @@ fn pull_before_period_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #4)")]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn pull_too_soon_after_last_pull() {
     let (e, _owner, payee, _token_addr, escrow_addr) = setup();
     let client = escrow(&e, &escrow_addr);
@@ -206,7 +207,7 @@ fn pull_from_non_payee_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #5)")]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn pull_insufficient_funds_rejected() {
     let (e, _owner, payee, _token_addr, escrow_addr) = setup();
     let client = escrow(&e, &escrow_addr);
@@ -236,6 +237,18 @@ fn pull_all_funds_exact() {
     assert_eq!(client.get_state().last_pull_ledger, 50);
 }
 
+#[test]
+fn top_up_by_direct_transfer() {
+    let (e, owner, _payee, token_addr, escrow_addr) = setup();
+    let client = escrow(&e, &escrow_addr);
+    let tok = token(&e, &token_addr);
+
+    // No deposit() method — the owner just sends more of the token directly.
+    tok.transfer(&owner, &escrow_addr, &AMOUNT);
+
+    assert_eq!(client.get_balance(), INITIAL_FUND + AMOUNT);
+}
+
 // ── cancel tests ────────────────────────────────────────────────────────────
 
 #[test]
@@ -247,7 +260,7 @@ fn cancel_returns_funds_to_owner() {
     e.ledger().set_sequence_number(10);
     client.pull(&owner);
 
-    client.cancel();
+    client.cancel(&owner);
 
     assert!(client.get_state().cancelled);
     assert_eq!(client.get_balance(), 0);
@@ -262,7 +275,7 @@ fn cancel_with_full_balance() {
     let client = escrow(&e, &escrow_addr);
     let tok = token(&e, &token_addr);
 
-    client.cancel();
+    client.cancel(&owner);
 
     assert!(client.get_state().cancelled);
     assert_eq!(client.get_balance(), 0);
@@ -271,13 +284,28 @@ fn cancel_with_full_balance() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #6)")]
+fn cancel_refunds_to_requested_address() {
+    let (e, owner, _payee, token_addr, escrow_addr) = setup();
+    let client = escrow(&e, &escrow_addr);
+    let tok = token(&e, &token_addr);
+    let destination = Address::generate(&e);
+
+    client.cancel(&destination);
+
+    assert!(client.get_state().cancelled);
+    assert_eq!(client.get_balance(), 0);
+    assert_eq!(tok.balance(&owner), 500);
+    assert_eq!(tok.balance(&destination), INITIAL_FUND);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn cancel_double_cancel_rejected() {
-    let (e, _owner, _payee, _token_addr, escrow_addr) = setup();
+    let (e, owner, _payee, _token_addr, escrow_addr) = setup();
     let client = escrow(&e, &escrow_addr);
 
-    client.cancel();
-    client.cancel();
+    client.cancel(&owner);
+    client.cancel(&owner);
 }
 
 #[test]
@@ -297,21 +325,21 @@ fn cancel_from_non_owner_rejected() {
         invoke: &soroban_sdk::testutils::MockAuthInvoke {
             contract: &escrow_addr,
             fn_name: "cancel",
-            args: Vec::new(&e),
+            args: (&attacker,).into_val(&e),
             sub_invokes: &[],
         },
     }]);
 
-    client.cancel();
+    client.cancel(&attacker);
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #6)")]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn pull_after_cancel_rejected() {
-    let (e, _owner, payee, _token_addr, escrow_addr) = setup();
+    let (e, owner, payee, _token_addr, escrow_addr) = setup();
     let client = escrow(&e, &escrow_addr);
 
-    client.cancel();
+    client.cancel(&owner);
 
     e.ledger().set_sequence_number(10);
     client.pull(&payee);
@@ -333,10 +361,10 @@ fn pull_emits_payment_released_event() {
 
 #[test]
 fn cancel_emits_escrow_cancelled_event() {
-    let (e, _owner, _payee, _token_addr, escrow_addr) = setup();
+    let (e, owner, _payee, _token_addr, escrow_addr) = setup();
     let client = escrow(&e, &escrow_addr);
 
-    client.cancel();
+    client.cancel(&owner);
 
     let events = e.events().all();
     assert_eq!(events.events().len(), 1);
